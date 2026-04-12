@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(powershell -Command \"Compress-Archive -Path 'index.html','script.js','style.css','favicon.png' -DestinationPath '../gsap-comingsoon-deploy.zip' -Force\")"
-    ]
-  }
-}
