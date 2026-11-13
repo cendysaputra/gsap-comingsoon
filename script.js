@@ -272,6 +272,38 @@ float textMask(vec2 at) {
   return texture2D(uText, st).r * inside.x * inside.y * uTextOn;
 }
 
+// Long, broken reflections along the current. Warped noise contours give each
+// crest its own bends and branches instead of evenly spaced horizontal stripes.
+vec3 noiseSlope(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f - 1.0) * (f - 1.0);
+  float a = hash(i);
+  float b = hash(i + vec2(1.0, 0.0));
+  float c = hash(i + vec2(0.0, 1.0));
+  float k = a - b - c + hash(i + vec2(1.0));
+  return vec3(a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y,
+    du * (vec2(b - a, c - a) + k * u.yx));
+}
+
+vec2 surfaceStreaks(vec2 q, vec2 warp, float t) {
+  vec2 st = vec2(q.x * 5.5, q.y * 40.0) + warp * 3.2;
+  st.y += (noise(vec2(q.x * 7.0, q.y * 6.0) - t * 0.12) - 0.5) * 1.5;
+  vec3 broad = noiseSlope(st + vec2(-t * 0.35, t * 0.08));
+  vec3 fine = noiseSlope(st * vec2(1.7, 1.9) + vec2(t * 0.24, 7.8));
+  // Divide by the slope to keep flat parts from blooming into white patches.
+  // Width stays in rendered pixels, including when adaptive quality drops.
+  float px = 1.0 / uRes.y;
+  float crestDist = abs(broad.x - 0.52) / max(length(broad.yz * vec2(5.5, 40.0)), 0.1);
+  float threadDist = abs(fine.x - 0.48) / max(length(fine.yz * vec2(9.35, 76.0)), 0.1);
+  float crest = 1.0 - smoothstep(px * 0.35, px * 1.8, crestDist);
+  float thread = 1.0 - smoothstep(px * 0.2, px, threadDist);
+  float gaps = smoothstep(0.24, 0.68, noise(vec2(q.x * 12.0, q.y * 16.0) + warp - t * 0.18));
+  float trough = 1.0 - smoothstep(0.025, 0.10, abs(broad.x - 0.62));
+  return vec2((crest + thread * 0.3) * gaps, trough * gaps);
+}
+
 void main() {
   // uv: screen heights, origin bottom-left. css: page pixels, origin top-left.
   vec2 uv = gl_FragCoord.xy / uRes.y;
@@ -368,9 +400,10 @@ void main() {
   // normal as the bed; long flowing ripples pull its edges sideways as well.
   // Scale with the type size so portrait text keeps its shape on tall phones.
   float typeScale = min(vh, uBox.z * 0.85);
+  vec2 streaks = surfaceStreaks(q + n.xy * 0.025, warp, t);
   float ribbon = noise(vec2(q.x * 5.0, q.y * 62.0) + warp * 2.0 - vec2(t * 0.7, 0.0));
   vec2 textAt = css + vec2(n.x, -n.y) * typeScale * 0.055
-    + vec2((ribbon - 0.5) * 0.013, (h0 - 0.4) * 0.009) * typeScale;
+    + vec2((ribbon - 0.5) * 0.013 + streaks.y * 0.012, (h0 - 0.4) * 0.009) * typeScale;
   float letters = textMask(textAt);
   // A faint refracted edge blends into the current instead of casting a drop shadow.
   float fringe = textMask(textAt + vec2(0.003, -0.001) * typeScale);
@@ -379,11 +412,13 @@ void main() {
   float pigment = smoothstep(0.14, 0.52, grain);
   float mottling = noise(inkAt * vec2(90.0, 170.0));
   float veil = smoothstep(0.30, 0.63, h0 + ribbon * 0.15);
-  float ink = letters * mix(0.70, 1.0, pigment) * mix(0.84, 1.0, mottling);
+  float ink = letters * mix(0.86, 1.0, pigment) * mix(0.84, 1.0, mottling);
   float sinking = smoothstep(0.30, 0.80, (textAt.y - uBox.y) / uBox.w);
   ink *= mix(1.0, 0.76, veil) * mix(1.0, 0.74, sinking);
+  // The darker face behind each bright crest briefly cuts through the lettering.
+  ink *= 1.0 - streaks.y * 0.62;
   // Enough scattered light to stay legible after the water's tone mapping.
-  vec3 inkColor = mix(vec3(0.95, 1.24, 1.32), vec3(1.75, 1.95, 2.0), pigment);
+  vec3 inkColor = mix(vec3(1.30, 1.55, 1.62), vec3(1.75, 1.95, 2.0), pigment);
   inkColor *= 0.80 + 0.35 * ca + 0.16 * max(dot(n.xy, vec2(-0.3, 0.45)), 0.0);
   col = mix(col, vec3(0.38, 0.57, 0.63), fringe * (1.0 - letters) * 0.14);
   col = mix(col, inkColor, ink);
@@ -406,6 +441,10 @@ void main() {
   float glint = max(dot(reflect(-light, n), vec3(0.0, 0.0, 1.0)), 0.0);
   float open = 1.0 - bank * 0.8;
   col += vec3(1.0, 0.97, 0.88) * (0.12 * pow(glint, 24.0) + 1.9 * pow(glint, 320.0)) * open;
+
+  // Crest reflections pass OVER both the water and the type, including on phones.
+  float streakLight = streaks.x * mix(0.55, 1.25, smoothstep(0.20, 0.65, h0));
+  col += vec3(1.35, 1.65, 1.80) * streakLight * open;
 
 #ifndef LITE
   // White water, kept small: thin streaks drawn out by the current, drifting
