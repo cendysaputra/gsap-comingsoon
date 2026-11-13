@@ -28,7 +28,7 @@ uniform vec2 uRes;       // canvas size in canvas pixels
 uniform float uPx;       // canvas pixels per CSS pixel
 uniform float uTime;
 uniform float uFlow;     // how far the river has flowed, in screen heights
-uniform sampler2D uText; // r: the letters, g: their soft shadow
+uniform sampler2D uText; // r: the submerged letter mask
 uniform vec4 uBox;       // where that texture sits on the page, in CSS pixels
 uniform float uTextOn;
 uniform vec4 uRip[6];    // pointer ripples: xy in screen heights, start time, flow then
@@ -265,6 +265,13 @@ float caustics(vec2 p, float t) {
   return pow(a * b, 3.0);
 }
 
+// Transparent outside the texture, even when strong refraction crosses its edge.
+float textMask(vec2 at) {
+  vec2 st = (at - uBox.xy) / uBox.zw;
+  vec2 inside = step(vec2(0.0), st) * step(st, vec2(1.0));
+  return texture2D(uText, st).r * inside.x * inside.y * uTextOn;
+}
+
 void main() {
   // uv: screen heights, origin bottom-left. css: page pixels, origin top-left.
   vec2 uv = gl_FragCoord.xy / uRes.y;
@@ -293,8 +300,6 @@ void main() {
   grad -= ripples(uv, t) * 0.13;
   vec3 n = normalize(vec3(grad * 0.05, 1.0));
   float tilt = length(n.xy);
-  // The same lean, in page pixels (y runs down the page).
-  vec2 lean = vec2(n.x, -n.y) * vh;
 
   // Deepest along the middle of the stream, with pools and bars that stay put.
   float mid = 1.0 - smoothstep(0.0, 0.62, abs(p.y - 0.5));
@@ -341,14 +346,9 @@ void main() {
   if (top < 0.5) occ *= 0.65 + 0.35 * smoothstep(0.0, 0.22, rim3);
   bedCol *= occ;
 
-  // The floating words shade the bed below them, down-sun of the letters.
-  vec2 shadowAt = css - vec2(0.012, 0.016) * vh + lean * 0.03 * depth;
-  float shadow = texture2D(uText, (shadowAt - uBox.xy) / uBox.zw).g * uTextOn;
-  bedCol *= 1.0 - 0.55 * shadow;
-
   // Sunlight on the bed, gathered into moving caustic lines.
   float ca = caustics(q * vec2(5.0, 9.0) + n.xy * 2.0, t);
-  bedCol *= 0.75 + 2.4 * ca * mix(1.0, 0.45, mid) * (1.0 - 0.7 * shadow);
+  bedCol *= 0.75 + 2.4 * ca * mix(1.0, 0.45, mid);
 
   // Water takes red first, then green, so the bed turns blue and dim with depth.
   vec3 absorb = vec3(3.2, 1.3, 0.85) * depth;
@@ -363,6 +363,30 @@ void main() {
   col = mix(col, vec3(0.58, 0.39, 0.16) * mix(exp(-absorb * 0.5), vec3(1.0), 0.45), fishMask * 0.92);
 #endif
   col += vec3(0.015, 0.085, 0.150) * (1.0 - exp(-depth * 1.9));
+
+  // Pale, granular lettering just BELOW the surface. Refract it with the same
+  // normal as the bed; long flowing ripples pull its edges sideways as well.
+  // Scale with the type size so portrait text keeps its shape on tall phones.
+  float typeScale = min(vh, uBox.z * 0.85);
+  float ribbon = noise(vec2(q.x * 5.0, q.y * 62.0) + warp * 2.0 - vec2(t * 0.7, 0.0));
+  vec2 textAt = css + vec2(n.x, -n.y) * typeScale * 0.055
+    + vec2((ribbon - 0.5) * 0.013, (h0 - 0.4) * 0.009) * typeScale;
+  float letters = textMask(textAt);
+  // A faint refracted edge blends into the current instead of casting a drop shadow.
+  float fringe = textMask(textAt + vec2(0.003, -0.001) * typeScale);
+  vec2 inkAt = (textAt - uBox.xy) / max(uBox.z, 1.0);
+  float grain = hash(floor(inkAt * 1500.0));
+  float pigment = smoothstep(0.14, 0.52, grain);
+  float mottling = noise(inkAt * vec2(90.0, 170.0));
+  float veil = smoothstep(0.30, 0.63, h0 + ribbon * 0.15);
+  float ink = letters * mix(0.70, 1.0, pigment) * mix(0.84, 1.0, mottling);
+  float sinking = smoothstep(0.30, 0.80, (textAt.y - uBox.y) / uBox.w);
+  ink *= mix(1.0, 0.76, veil) * mix(1.0, 0.74, sinking);
+  // Enough scattered light to stay legible after the water's tone mapping.
+  vec3 inkColor = mix(vec3(0.95, 1.24, 1.32), vec3(1.75, 1.95, 2.0), pigment);
+  inkColor *= 0.80 + 0.35 * ca + 0.16 * max(dot(n.xy, vec2(-0.3, 0.45)), 0.0);
+  col = mix(col, vec3(0.38, 0.57, 0.63), fringe * (1.0 - letters) * 0.14);
+  col = mix(col, inkColor, ink);
 
   // What the surface mirrors: bright sky overhead, dark trees leaning in from the banks.
 #ifdef LITE
@@ -411,13 +435,6 @@ void main() {
   col *= 1.0 - 0.3 * pow(abs(uv.y - 0.5) * 2.0, 2.5);
   // A soft shoulder keeps the glints from clipping flat without lifting the shadows.
   col = 1.0 - exp(-col * 1.35);
-
-  // The words ride the surface like paper: they sway with it, tilt towards and
-  // away from the sun, and the taller swells wash over them.
-  float letters = texture2D(uText, (css + lean * 0.006 - uBox.xy) / uBox.zw).r * uTextOn;
-  float wash = 0.3 * smoothstep(0.52, 0.72, h0);
-  float shade = clamp(1.0 + dot(n.xy, light.xy) * 0.7, 0.84, 1.04);
-  col = mix(col, vec3(0.984, 0.980, 0.961) * shade, letters * (0.95 - wash));
 
   // A little noise, so the smooth gradients don't band.
   col += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
@@ -569,7 +586,7 @@ void main() {
         gl.uniform1f(uniforms.uPx, canvas.width / cssWidth);
     }
 
-    // Redraws the heading into a texture for the river to float on its surface.
+    // Redraws the heading into a mask that the river refracts below its surface.
     function updateText() {
         if (!fontsReady) {
             return;
@@ -597,7 +614,6 @@ void main() {
         textCtx.setTransform(scale, 0, 0, scale, -(rect.left - pad) * scale, -(rect.top - pad) * scale);
         textCtx.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
         textCtx.textBaseline = 'alphabetic';
-        textCtx.globalCompositeOperation = 'lighter';
 
         const ascent = textCtx.measureText('M').fontBoundingBoxAscent || fontSize * 0.8;
         const letters = Array.from(title.querySelectorAll('.letter'), (el) => {
@@ -607,16 +623,8 @@ void main() {
             return { text, x: r.left, y: r.top + ascent };
         });
 
-        // Green: a blurred copy, for the shadow on the river bed.
-        textCtx.fillStyle = '#0f0';
-        textCtx.shadowColor = '#0f0';
-        textCtx.shadowBlur = fontSize * 0.1 * scale;
-        letters.forEach((l) => textCtx.fillText(l.text, l.x, l.y));
-
         // Red: the letters themselves.
         textCtx.fillStyle = '#f00';
-        textCtx.shadowColor = 'transparent';
-        textCtx.shadowBlur = 0;
         letters.forEach((l) => textCtx.fillText(l.text, l.x, l.y));
 
         gl.bindTexture(gl.TEXTURE_2D, textTexture);

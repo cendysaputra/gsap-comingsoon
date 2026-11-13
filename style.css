@@ -63,7 +63,7 @@ body {
   margin-left: 0.25em;
 }
 
-/* Once the river is running it draws the words itself, floating on the water.
+/* Once the river is running it draws the words itself, refracted under the water.
    The real heading stays in place, unseen, for screen readers and search. */
 .has-water .title {
   color: transparent;
