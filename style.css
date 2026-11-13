@@ -5,149 +5,91 @@
 }
 
 :root {
-  --bg-top: #f6f5f1;
-  --bg-bottom: #d9d6cf;
-  --ink: #111111;
-  --panel: rgba(255, 255, 255, 0.38);
-  --panel-border: rgba(17, 17, 17, 0.08);
+  --water: #123f5a;
+  --water-light: #1f6a86;
+  --paper: #fbfaf5;
 }
 
 html,
 body {
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
   overflow: hidden;
-  background: radial-gradient(circle at top, rgba(255, 255, 255, 0.85), transparent 48%), linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  /* Shown before the river paints, and instead of it where WebGL is missing. */
+  background: radial-gradient(120% 90% at 30% 20%, var(--water-light), var(--water) 70%);
 }
 
-body {
-  position: relative;
-  color: var(--ink);
-}
-
-body::before {
-  content: "";
+.river {
   position: fixed;
   inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.22;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 128px 128px;
-  animation: grain-shift 0.8s steps(6) infinite;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  transition: opacity 1.4s ease;
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 42vh;
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.1));
-}
-
-@keyframes grain-shift {
-  0% {
-    background-position: 0 0;
-  }
-  16% {
-    background-position: -20px 10px;
-  }
-  33% {
-    background-position: 15px -25px;
-  }
-  50% {
-    background-position: -10px 30px;
-  }
-  66% {
-    background-position: 25px -15px;
-  }
-  83% {
-    background-position: -30px -5px;
-  }
-  100% {
-    background-position: 0 0;
-  }
-}
-
-#rainCanvas {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
+.has-water .river {
+  opacity: 1;
 }
 
 .content {
   position: relative;
-  z-index: 2;
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
   height: 100vh;
-  width: 100vw;
+  height: 100dvh;
+  padding: 0 16px;
+  /* The river takes the pointer, so moving over the words still stirs it. */
+  pointer-events: none;
+}
+
+.title {
+  font-family: "Manrope", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font-size: clamp(2.5rem, 11vw, 10rem);
+  font-weight: 800;
+  line-height: 1.05;
   text-align: center;
+  white-space: nowrap;
+  color: var(--paper);
+  text-shadow: 0 0.04em 0.18em rgba(0, 22, 30, 0.45);
 }
 
-.content h1 {
-  font-family: "Space Mono", monospace;
-  font-size: 2rem;
-  font-weight: 400;
-  color: var(--ink);
-  letter-spacing: 0.11em;
-  line-height: 100%;
-  text-transform: uppercase;
+.title .word {
+  display: inline-block;
 }
 
-.dot {
-  opacity: 0;
+.title .word + .word {
+  margin-left: 0.25em;
 }
 
-.description {
-  font-family: "Space Mono", monospace;
-  font-size: 16px;
-  font-weight: 400;
-  color: rgba(17, 17, 17, 0.82);
-  margin-top: 1rem;
-  letter-spacing: 0.1em;
+/* Once the river is running it draws the words itself, floating on the water.
+   The real heading stays in place, unseen, for screen readers and search. */
+.has-water .title {
+  color: transparent;
+  text-shadow: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-/* Tablet */
-@media (max-width: 1024px) {
-  .content h1 {
-    font-size: 1.75rem;
+/* Narrow portrait screens: one word per line, so the letters can be large. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .title {
+    font-size: 20vw;
   }
 
-  .description {
-    font-size: 14px;
+  .title .word {
+    display: block;
+  }
+
+  .title .word + .word {
+    margin-left: 0;
+    margin-top: -0.1em;
   }
 }
 
-/* Mobile */
-@media (max-width: 768px) {
-  .content {
-    align-items: flex-start;
-    text-align: left;
-    justify-content: flex-start;
-    padding: 168px 16px 0;
-  }
-
-  .content h1 {
-    font-size: 1.2rem;
-    padding: 0;
-    text-align: left;
-  }
-
-  .description {
-    font-size: 12px;
-    margin-top: 14px;
-    padding: 0;
-    text-align: left;
-    max-width: 19rem;
-    line-height: 1.55;
+@media (prefers-reduced-motion: reduce) {
+  .river {
+    transition: none;
   }
 }
